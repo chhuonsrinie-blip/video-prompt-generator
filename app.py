@@ -19,7 +19,7 @@ def get_secret(name, default=""):
     except:
         return os.getenv(name, default)
 
-GEMINI_API_KEY = get_secret("AIzaSyBFWJ8b7nuga_g7xrGBEvbzCZqVf-KUb8g")
+GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
 
 if not GEMINI_API_KEY:
     st.error("❌ Gemini API key not found. Set GEMINI_API_KEY in Streamlit Secrets.")
