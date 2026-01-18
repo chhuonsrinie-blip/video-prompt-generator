@@ -16,6 +16,11 @@ import streamlit as st
 from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont
 
+# =========================================================
+# Whisk
+# =========================================================
+WHISK_URL = "https://labs.google/fx/tools/whisk"
+
 
 # =========================================================
 # Password gate (Streamlit Cloud + Codespaces safe)
@@ -28,6 +33,7 @@ def _get_password() -> str:
     except Exception:
         return os.getenv("APP_PASSWORD", "")
 
+
 def require_password():
     st.session_state.setdefault("authed", False)
     expected = _get_password()
@@ -35,7 +41,7 @@ def require_password():
     if not expected:
         st.warning(
             "No password configured.\n\n"
-            "✅ Streamlit Cloud: Manage app → Settings → Secrets → add\n"
+            "✅ Streamlit Cloud: Manage app → Settings → Secrets → add:\n"
             'APP_PASSWORD = "your_password"\n\n'
             "✅ Codespaces: create .streamlit/secrets.toml with APP_PASSWORD, or set env var APP_PASSWORD."
         )
@@ -168,6 +174,7 @@ def detect_platform(url: str) -> str:
     if "youtube.com" in host or "youtu.be" in host: return "youtube"
     return "web"
 
+
 def extract_opengraph(url: str) -> Dict[str, str]:
     """
     Best-effort OpenGraph/meta scraping.
@@ -196,8 +203,8 @@ def extract_opengraph(url: str) -> Dict[str, str]:
     title = og("og:title") or (soup.title.string.strip() if soup.title and soup.title.string else "")
     desc = og("og:description") or md("description")
     image = og("og:image")
-
     return {"title": title, "description": desc, "image": image}
+
 
 def build_clone_brief(url: str) -> Dict[str, str]:
     platform = detect_platform(url)
@@ -233,8 +240,10 @@ def infer_category(text: str) -> str:
             best, best_score = cat, score
     return best if best_score >= 2 else "Movie (Real-life)"
 
+
 def calc_scene_count(total_seconds: int, scene_seconds: int) -> int:
     return max(1, int(math.ceil(total_seconds / max(scene_seconds, 5))))
+
 
 def beat(i: int, n: int) -> str:
     if n == 1:
@@ -248,6 +257,7 @@ def beat(i: int, n: int) -> str:
         return "Turning point: biggest change/reveal; clear cause-effect."
     return "Progress logically from previous scene; small change, same continuity."
 
+
 def scene_title(category: str, i: int) -> str:
     titles = {
         "Bushcraft": ["Forest Arrival","Site Chosen","Fire Prepared","Camp Set","Quiet Night"],
@@ -260,6 +270,7 @@ def scene_title(category: str, i: int) -> str:
     arr = titles.get(category, titles["Movie (Real-life)"])
     return arr[min(i - 1, len(arr) - 1)]
 
+
 def build_prompts(
     i: int,
     n: int,
@@ -271,7 +282,6 @@ def build_prompts(
     p = STYLE_PRESETS[category]
     title = scene_title(category, i)
 
-    # Unique prompts: title + beat + continuity + clone cues
     video_prompt = f"""SCENE {i}/{n} — {title} (5–8s) [{orientation}]
 CONTINUITY (LOCKED):
 - Actor/Subject: {bible['actor']}
@@ -317,17 +327,14 @@ def make_scene_card_png(scene_label: str, story: str, w: int = 1200, h: int = 65
         ft = ImageFont.load_default()
         fb = ImageFont.load_default()
 
-    # Header
     d.rectangle([0, 0, w, 70], fill=(7, 11, 22))
     d.text((18, 18), scene_label, font=ft, fill=(230, 240, 255))
 
-    # Story box
     d.rectangle([18, 95, w - 18, 250], outline=(60, 90, 140), width=2)
     d.text((32, 110), "STORY", font=fb, fill=(140, 190, 255))
     wrapped = "\n".join(textwrap.wrap(story, width=110))
     d.text((32, 140), wrapped, font=fb, fill=(210, 225, 245))
 
-    # Prompt box placeholder
     d.rectangle([18, 280, w - 18, h - 18], outline=(60, 90, 140), width=2)
     d.text((32, 295), "PROMPT", font=fb, fill=(140, 190, 255))
     d.text((32, 325), "Copy prompts from the web app prompt blocks.", font=fb, fill=(160, 175, 200))
@@ -349,6 +356,7 @@ class SceneOut:
     image_prompt: str
     card_png: bytes
 
+
 def build_zip(meta: Dict, scenes: List[SceneOut]) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
@@ -362,13 +370,53 @@ def build_zip(meta: Dict, scenes: List[SceneOut]) -> bytes:
     return buf.getvalue()
 
 
+def build_whisk_zip(meta: Dict, scenes: List[SceneOut], subject_img: bytes | None, style_img: bytes | None) -> bytes:
+    """
+    Whisk Pack ZIP:
+    whisk/meta.json
+    whisk/subject.png (optional)
+    whisk/style.png (optional)
+    whisk/scenes/scene_01/scene.png  (scene ref)
+    whisk/scenes/scene_01/prompt.txt (whisk prompt)
+    """
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr("whisk/meta.json", json.dumps(meta, indent=2, ensure_ascii=False))
+
+        if subject_img:
+            z.writestr("whisk/subject.png", subject_img)
+        if style_img:
+            z.writestr("whisk/style.png", style_img)
+
+        for s in scenes:
+            base = f"whisk/scenes/scene_{s.idx:02d}"
+            z.writestr(f"{base}/scene.png", s.card_png)
+
+            whisk_prompt = f"""SUBJECT (locked): {meta['bible']['actor']}
+SCENE (world): {meta['bible']['setting']}
+STYLE (mood): {meta['bible']['mood']}
+CATEGORY: {meta['category_final']}
+
+SCENE TITLE: {s.title}
+SCENE ROLE: {s.story.splitlines()[0]}
+
+PROMPT (paste in Whisk):
+{s.image_prompt}
+"""
+            z.writestr(f"{base}/prompt.txt", whisk_prompt)
+
+    return buf.getvalue()
+
+
 # =========================================================
-# Streamlit UI
+# Streamlit App
 # =========================================================
 st.set_page_config(page_title="Scene Cards Prompt Generator", layout="wide")
 inject_css()
+require_password()
+
 st.title("Scene Cards Prompt Generator")
-st.caption("URL → auto source + category → continuity bible → unique scene cards with video+image prompts + ZIP export.")
+st.caption("URL → auto source + category → continuity bible → unique scene cards with video+image prompts + ZIP/JSON + Whisk Pack export.")
 
 with st.sidebar:
     st.subheader("Inputs")
@@ -390,9 +438,16 @@ with st.sidebar:
     setting = st.text_area("Setting/World lock", "Same world continuity; location evolves logically scene-to-scene.")
     mood = st.text_area("Mood arc", "Coherent emotional progression; no random shifts.")
 
+    st.divider()
+    st.subheader("Whisk Integration")
+    subject_upload = st.file_uploader("Upload SUBJECT reference image (optional)", type=["png","jpg","jpeg"])
+    style_upload = st.file_uploader("Upload STYLE reference image (optional)", type=["png","jpg","jpeg"])
+
     generate = st.button("Generate Scene Cards", type="primary")
 
-# Auto analysis
+subject_bytes = subject_upload.getvalue() if subject_upload else None
+style_bytes = style_upload.getvalue() if style_upload else None
+
 clone = {"platform": "web", "compact": "No URL provided."}
 suggested = "Movie (Real-life)"
 
@@ -414,6 +469,13 @@ with c2:
     st.text_area("Used cues", clone.get("compact", ""), height=120)
 
 if generate:
+    # Ensure final category exists in presets
+    if final_category == "Auto":
+        final_category = "Movie (Real-life)"
+    if final_category not in STYLE_PRESETS:
+        st.error("Invalid category selected.")
+        st.stop()
+
     n = calc_scene_count(int(total_seconds), int(scene_seconds))
     bible = {"actor": actor.strip(), "setting": setting.strip(), "mood": mood.strip()}
 
@@ -425,7 +487,6 @@ if generate:
             f"Actor continuity: {bible['actor']}\n"
             f"Setting continuity: {bible['setting']}"
         )
-
         vp, ip = build_prompts(i, n, final_category, bible, clone.get("compact", ""), orientation)
         card_png = make_scene_card_png(f"SCENE {i} — {title}", story)
 
@@ -462,10 +523,10 @@ if generate:
                 st.write(s.story)
 
                 st.markdown("**PROMPT (VIDEO)**")
-                st.code(s.video_prompt, language="text")  # copy icon appears in Streamlit UI
+                st.code(s.video_prompt, language="text")
 
                 st.markdown("**PROMPT (IMAGE)**")
-                st.code(s.image_prompt, language="text")  # copy icon appears in Streamlit UI
+                st.code(s.image_prompt, language="text")
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     meta = {
@@ -481,12 +542,10 @@ if generate:
         "bible": bible,
     }
 
-    zip_bytes = build_zip(meta, scenes)
-    meta_json = json.dumps(meta, indent=2, ensure_ascii=False).encode("utf-8")
-
     st.divider()
     st.subheader("Export")
 
+    zip_bytes = build_zip(meta, scenes)
     st.download_button(
         "Download ZIP (txt + scene_card.png per scene + meta.json)",
         data=zip_bytes,
@@ -496,11 +555,24 @@ if generate:
 
     st.download_button(
         "Download JSON (meta only)",
-        data=meta_json,
+        data=json.dumps(meta, indent=2, ensure_ascii=False).encode("utf-8"),
         file_name=f"scene_cards_meta_{stamp}.json",
         mime="application/json"
     )
 
-    st.success("Done. Each scene now has unique prompts + a PNG card image in the ZIP export.")
+    st.divider()
+    st.subheader("Whisk Export")
+
+    st.link_button("Open Google Whisk", WHISK_URL)
+
+    whisk_zip = build_whisk_zip(meta, scenes, subject_bytes, style_bytes)
+    st.download_button(
+        "Download Whisk Pack ZIP (subject/style + per-scene scene.png + prompt.txt)",
+        data=whisk_zip,
+        file_name=f"whisk_pack_{stamp}.zip",
+        mime="application/zip"
+    )
+
+    st.success("Done. Scene prompts are unique, export works, and Whisk Pack is ready.")
 else:
     st.info("Paste a URL, set your continuity bible, then click **Generate Scene Cards**.")
