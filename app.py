@@ -1,13 +1,33 @@
 import streamlit as st
-import google.generativeai as genai
-import json
 import time
+import json
 import os
+import sys
+import subprocess
+
+# --- 🛠️ AUTO-REPAIR ZONE ---
+# This forces the server to update the AI library if it's too old
+try:
+    import google.generativeai as genai
+    from importlib.metadata import version
+    current_ver = version("google-generativeai")
+    
+    # If version is old (older than 0.8.0), force update
+    if current_ver < "0.8.0":
+        st.warning(f"⚠️ Updating AI Brain... (Current: {current_ver}) - Please wait 10s...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "google-generativeai>=0.8.3"])
+        st.success("✅ Update Complete! Reloading...")
+        time.sleep(2)
+        st.rerun()
+except Exception as e:
+    # If not found at all, install it
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "google-generativeai>=0.8.3"])
+    st.rerun()
 
 # --- APP CONFIGURATION ---
 st.set_page_config(page_title="Google Studio: Omni", page_icon="♾️", layout="wide")
 
-# Custom CSS for the "Pro" look
+# Custom CSS
 st.markdown("""
 <style>
     .stApp { background-color: #0e1117; color: white; }
@@ -18,56 +38,46 @@ st.markdown("""
         margin-bottom: 20px; 
         border-left: 6px solid;
     }
-    .model-tag {
-        background: #374151;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 0.8em;
-        color: #9ca3af;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- SIDEBAR: CONTROL CENTER ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.title("🎛️ Control Center")
     
-    # API Key Input
-    # Checks if key is in secrets (for GitHub Spaces) or asks user
+    # Debug info (so you can see it working)
+    st.caption(f"✅ System Version: {genai.__version__}")
+
     if "GOOGLE_API_KEY" in st.secrets:
         api_key = st.secrets["GOOGLE_API_KEY"]
-        st.success("✅ API Key loaded from Secrets")
+        st.success("Key loaded from Secrets")
     else:
         api_key = st.text_input("Google API Key", type="password")
-        st.caption("Get it from: aistudio.google.com")
     
     st.divider()
     
-    # THE NEW MODEL SELECTOR
-    st.subheader("🤖 Select AI Model")
     selected_model = st.selectbox(
         "Choose your engine:",
         [
-            "gemini-2.0-flash-exp",   # Newest, Best Overall
-            "gemini-1.5-pro",         # Best for Storytelling/Creativity
-            "gemini-1.5-flash",       # Fast & Reliable
-            "gemini-1.5-flash-8b"     # Ultra Fast
+            "gemini-1.5-flash",       # FASTEST & FREE
+            "gemini-1.5-pro",         # SMARTEST
+            "gemini-2.0-flash-exp",   # EXPERIMENTAL (Limit 429 prone)
         ],
-        index=0 # Default to 2.0 Flash
+        index=0 
     )
     
-    # Dynamic Model Info
-    if "2.0" in selected_model:
-        st.info("✨ **Gemini 2.0 Flash:** The latest experimental model. Smartest and Multimodal.")
-        border_color = "#3B82F6" # Blue
-    elif "pro" in selected_model:
-        st.info("🧠 **Gemini 1.5 Pro:** High intelligence. Best for complex scripts.")
-        border_color = "#8B5CF6" # Purple
-    else:
-        st.info("⚡ **Gemini 1.5 Flash:** Optimized for speed and efficiency.")
+    # Visual feedback for model selection
+    if "flash" in selected_model and "2.0" not in selected_model:
         border_color = "#F59E0B" # Orange
+        st.info("⚡ **Flash 1.5:** Best for speed and high limits.")
+    elif "pro" in selected_model:
+        border_color = "#8B5CF6" # Purple
+        st.info("🧠 **Pro 1.5:** Best for creative writing.")
+    else:
+        border_color = "#3B82F6" # Blue
+        st.info("✨ **Flash 2.0:** Experimental (Low Limits).")
 
-# --- CORE AI FUNCTIONS ---
+# --- AI FUNCTIONS ---
 def get_gemini_response(prompt, model_name):
     if not api_key: return None
     genai.configure(api_key=api_key)
@@ -75,87 +85,67 @@ def get_gemini_response(prompt, model_name):
         model = genai.GenerativeModel(model_name)
         return model.generate_content(prompt)
     except Exception as e:
-        st.error(f"Error with {model_name}: {e}")
+        st.error(f"Error: {str(e)}")
         return None
 
 def create_director_plan(topic, model_name):
     prompt = f"""
     Act as a Visionary Film Director using {model_name}.
-    Create a highly detailed 3-Scene Storyboard for: '{topic}'
+    Create a 3-Scene Storyboard for: '{topic}'
     
-    Output STRICT JSON format (no markdown):
+    Output STRICT JSON format (no markdown, no ```json tags):
     {{
         "title": "Film Title",
         "genre": "Genre",
-        "logline": "One sentence summary",
         "scenes": [
             {{
                 "id": 1,
-                "action": "Detailed action description",
-                "veo_prompt": "Cinematic video, [SUBJECT], [ACTION], [LIGHTING], 4k, photorealistic, slow motion",
-                "imagen_prompt": "Photorealistic close-up of [SUBJECT], [EXPRESSION], [LIGHTING], 8k, highly detailed"
+                "action": "Action description",
+                "veo_prompt": "Cinematic video, [SUBJECT], [ACTION], 4k",
+                "imagen_prompt": "Photorealistic photo of [SUBJECT], 8k"
             }}
         ]
     }}
     """
     response = get_gemini_response(prompt, model_name)
     if response:
-        # Clean JSON string
         text = response.text.replace("```json", "").replace("```", "").strip()
         try:
             return json.loads(text)
         except:
-            st.error("Raw JSON Error. Try again.")
+            st.error("AI Output Error. Try again.")
             return None
     return None
 
 # --- MAIN UI ---
 st.title("♾️ Google Studio: Omni Edition")
-st.caption(f"Powered by **{selected_model}**")
 
-col1, col2 = st.columns([3, 1])
-with col1:
-    topic = st.text_input("Enter your vision:", placeholder="Example: A documentary about life on Mars in the year 3000...")
-with col2:
-    st.write("") # Spacer
-    st.write("") # Spacer
-    generate = st.button("🚀 Generate Story", type="primary")
+topic = st.text_input("Enter your vision:", placeholder="E.g., A cyberpunk detective story...")
+generate = st.button("🚀 Generate Story", type="primary")
 
 if generate and api_key:
-    start_time = time.time()
-    
-    with st.spinner(f"🧠 {selected_model} is directing..."):
+    with st.spinner(f"🧠 {selected_model} is working..."):
         data = create_director_plan(topic, selected_model)
-    
-    elapsed = round(time.time() - start_time, 2)
     
     if data:
         st.divider()
-        st.success(f"Generated in {elapsed}s using {selected_model}")
+        st.header(f"{data['title']} ({data['genre']})")
         
-        # Header
-        st.header(data['title'])
-        st.markdown(f"**Genre:** {data['genre']} | *{data['logline']}*")
-        
-        # Scenes Loop
         for scene in data['scenes']:
-            with st.container():
-                # Dynamic Border Color based on model
-                st.markdown(
-                    f"<div class='scene-card' style='border-left-color: {border_color};'>"
-                    f"<h3>🎬 Scene {scene['id']}</h3>"
-                    f"<p>{scene['action']}</p>"
-                    f"</div>", 
-                    unsafe_allow_html=True
-                )
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.caption("📹 **Veo / VideoFX Prompt** (Copy for Google VideoFX)")
-                    st.code(scene['veo_prompt'], language="text")
-                with c2:
-                    st.caption("📸 **Imagen / ImageFX Prompt** (Copy for Google ImageFX)")
-                    st.code(scene['imagen_prompt'], language="text")
+            st.markdown(
+                f"<div class='scene-card' style='border-left-color: {border_color};'>"
+                f"<h3>🎬 Scene {scene['id']}</h3>"
+                f"<p>{scene['action']}</p>"
+                f"</div>", 
+                unsafe_allow_html=True
+            )
+            c1, c2 = st.columns(2)
+            with c1:
+                st.code(scene['veo_prompt'], language="text")
+                st.caption("Video Prompt")
+            with c2:
+                st.code(scene['imagen_prompt'], language="text")
+                st.caption("Image Prompt")
 
 elif generate and not api_key:
-    st.warning("⚠️ Please enter your Google API Key in the sidebar.")
+    st.warning("Please enter your API Key.")
