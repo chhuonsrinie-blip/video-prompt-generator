@@ -1,4 +1,3 @@
 streamlit
 requests
-pillow
-google-generativeai
+google-genai
