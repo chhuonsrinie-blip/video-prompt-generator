@@ -7,17 +7,17 @@ import time
 import zipfile
 from dataclasses import dataclass, asdict
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import requests
 import streamlit as st
-from google import genai
+from google import genai  # requires google-genai
 
 
 # ============================================================
 # CONFIG
 # ============================================================
-APP_TITLE = "Storyboard Studio (Gemini Only)"
+APP_TITLE = "Storyboard Studio (Gemini Only • Master Prompt)"
 UA = {"User-Agent": "Mozilla/5.0 (StoryboardStudio/1.0)"}
 
 CATEGORIES = [
@@ -49,7 +49,7 @@ def get_secret(name: str, default: str = "") -> str:
 def auth_gate() -> bool:
     """
     If APP_PASSWORD is set -> require login.
-    If not set -> allow access (so you can disable password easily).
+    If not set -> allow access.
     """
     password = get_secret("APP_PASSWORD", "")
     if not password:
@@ -73,7 +73,7 @@ def auth_gate() -> bool:
 def get_gemini_client() -> genai.Client:
     key = get_secret("GEMINI_API_KEY", "")
     if not key:
-        st.error("❌ Gemini API key not found. Set GEMINI_API_KEY in Streamlit Secrets.")
+        st.error("❌ GEMINI_API_KEY not found. Set it in Streamlit Secrets.")
         st.stop()
     return genai.Client(api_key=key)
 
@@ -195,50 +195,24 @@ def fallback_storyboard(
     detail_level: str,
 ) -> dict:
     """
-    Offline storyboard (no Gemini). Always works.
+    Offline fallback: always returns scenes with MASTER_PROMPT.
     """
     n = scene_count(total_seconds, seconds_per_scene)
-
     category_final = category_choice if category_choice != "Auto" else "Movie (Real-life)"
 
-    # Auto continuity
-    def cont(cat: str) -> dict:
-        if cat == "Animals (Real-life)":
-            return {
-                "actor_lock": "Same animal subject across all scenes (consistent markings/features; natural behavior).",
-                "setting_lock": "Same habitat; time-of-day evolves logically; respectful distance.",
-                "mood_arc": "Observational calm → behavior highlight → calm exit.",
-                "rules": "No text/logos. Wildlife realism. No human interference."
-            }
-        if cat == "DIY":
-            return {
-                "actor_lock": "Same craftsperson across scenes (consistent hands/outfit; same tools).",
-                "setting_lock": "Same clean workshop/workbench; coherent lighting.",
-                "mood_arc": "Clear progress beats → satisfying reveal.",
-                "rules": "No text/logos. Realistic physics. No dangerous instructions."
-            }
-        if cat in ["Bushcraft", "Survival", "Shelter"]:
-            return {
-                "actor_lock": "Same outdoors person across scenes (consistent outfit/gear; same identity).",
-                "setting_lock": "Same outdoor location continuity; weather/time shifts gradually.",
-                "mood_arc": "Rising tension → action → relief." if cat == "Survival" else "Calm focus → steady progress → satisfying completion.",
-                "rules": "No text/logos. Depict safely. No step-by-step dangerous instructions."
-            }
-        return {
-            "actor_lock": "Same main character across scenes (consistent identity/outfit/props).",
-            "setting_lock": "Same world continuity; location evolves logically scene-to-scene.",
-            "mood_arc": "Cinematic build-up → turning point → resolution.",
-            "rules": "No text/logos. Realistic physics. Continuity enforced."
-        }
-
-    continuity = cont(category_final)
+    continuity = {
+        "actor_lock": "Same main subject across scenes (identity + outfit/markings consistent).",
+        "setting_lock": "Same world continuity; location evolves logically scene-to-scene.",
+        "mood_arc": "Coherent progression; no random shifts.",
+        "rules": "No text/watermarks/logos. Realistic physics. Continuity enforced."
+    }
 
     beats = [
         ("Opening Shot", "Establish subject, setting, and goal/tension."),
         ("Rising Tension", "Introduce a constraint; maintain continuity."),
         ("First Action", "Show meaningful progress with detail inserts."),
-        ("Progress Check", "Show measurable progress; small improvement."),
-        ("Turning Point", "Key milestone achieved; emotional beat increases."),
+        ("Progress Check", "Measurable progress; small improvement."),
+        ("Turning Point", "Key milestone; emotional beat increases."),
         ("Resolution", "Satisfying completion; clean hold for cut."),
     ]
     beats = (beats * ((n // len(beats)) + 1))[:n]
@@ -253,34 +227,24 @@ def fallback_storyboard(
     scenes = []
     for i in range(1, n + 1):
         title, beat = beats[i - 1]
-        story = f"{beat} Continuity: {continuity['actor_lock']} | {continuity['setting_lock']}"
-
-        video_prompt = (
-            f"SCENE {i}/{n} ({orientation})\n"
-            f"Category: {category_final}\n"
-            f"Title: {title}\n"
-            f"Beat: {beat}\n"
-            f"Continuity: {continuity['actor_lock']} ; {continuity['setting_lock']}\n"
-            f"Mood arc: {continuity['mood_arc']}\n"
-            f"Rules: {continuity['rules']}\n"
-            f"Source: {meta.source} | {meta.title}\n"
-        ).strip()
-
-        image_prompt = (
-            f"IMAGE PROMPT — Scene {i}/{n} — {title} ({category_final}) [{orientation}]\n"
-            f"{detail_phrase(detail_level)}. Real-life cinematic look.\n"
-            f"Subject lock: {continuity['actor_lock']}\n"
-            f"Setting lock: {continuity['setting_lock']}\n"
-            f"Beat: {beat}\n"
-            f"No text, no watermark.\n"
-        ).strip()
+        master = f"""MASTER PROMPT — Scene {i}/{n} — {title} ({category_final}) [{orientation}] (5–8s)
+{detail_phrase(detail_level)}. Cinematic realism, coherent color grading, no text/watermark.
+SUBJECT LOCK: {continuity['actor_lock']}
+SETTING LOCK: {continuity['setting_lock']}
+MOOD ARC: {continuity['mood_arc']}
+CAMERA: 35mm cinematic look; one clear camera move; shallow depth of field; stable framing.
+LIGHTING: motivated practical/natural light; realistic shadows.
+ACTION BEAT: {beat}
+TIMING: 0–2s establish → 2–6s progress → 6–8s settle/hold for cut.
+RULES: {continuity['rules']}
+SOURCE CUES: {meta.source} | {meta.title}
+""".strip()
 
         scenes.append({
             "idx": i,
             "title": title,
-            "story": story,
-            "video_prompt": video_prompt,
-            "image_prompt": image_prompt
+            "story": beat,
+            "master_prompt": master
         })
 
     return {
@@ -291,7 +255,7 @@ def fallback_storyboard(
 
 
 # ============================================================
-# GEMINI STORYBOARD (JSON)
+# GEMINI STORYBOARD (MASTER_PROMPT JSON)
 # ============================================================
 def safe_json_from_text(text: str) -> dict:
     t = (text or "").strip()
@@ -353,8 +317,7 @@ Return STRICT JSON ONLY (no markdown, no commentary) with schema:
       "idx": 1,
       "title": "short title",
       "story": "1-2 sentences",
-      "video_prompt": "detailed 5–8s video prompt",
-      "image_prompt": "detailed image prompt"
+      "master_prompt": "ONE MASTER PROMPT usable for BOTH video and image generation. Must include: 5–8s timing, camera move, shot framing, lighting, action beat, continuity locks, style, end-hold for cut, and 'no text/watermark'."
     }}
   ]
 }}
@@ -369,7 +332,6 @@ Return STRICT JSON ONLY (no markdown, no commentary) with schema:
 
     data = safe_json_from_text(resp.text)
 
-    # normalize scene count and indices
     scenes = data.get("scenes", [])[:n]
     for i, s in enumerate(scenes, start=1):
         s["idx"] = i
@@ -380,6 +342,11 @@ Return STRICT JSON ONLY (no markdown, no commentary) with schema:
 
     if "continuity" not in data:
         data["continuity"] = {}
+
+    # ensure master_prompt exists
+    for s in data["scenes"]:
+        if "master_prompt" not in s:
+            s["master_prompt"] = f"MASTER PROMPT — Scene {s['idx']}/{n} — {s.get('title','Scene')} ({data['category_final']}) [{orientation}]"
 
     return data
 
@@ -395,8 +362,7 @@ def build_zip(project: dict) -> bytes:
             base = f"scenes/scene_{s['idx']:02d}"
             z.writestr(f"{base}/title.txt", s["title"])
             z.writestr(f"{base}/story.txt", s["story"])
-            z.writestr(f"{base}/video_prompt.txt", s["video_prompt"])
-            z.writestr(f"{base}/image_prompt.txt", s["image_prompt"])
+            z.writestr(f"{base}/master_prompt.txt", s["master_prompt"])
     return mem.getvalue()
 
 
@@ -404,8 +370,8 @@ def build_zip(project: dict) -> bytes:
 # UI
 # ============================================================
 st.set_page_config(page_title=APP_TITLE, layout="wide")
-st.title("🎬 Storyboard Studio (Gemini Only)")
-st.caption("Gemini generates all scene-by-scene prompts. No ImageFX/Whisk required.")
+st.title("🎬 Storyboard Studio (Gemini Only • Master Prompt)")
+st.caption("Each scene outputs ONE MASTER PROMPT (usable as both VIDEO and IMAGE prompt). No ImageFX/Whisk needed.")
 
 if not auth_gate():
     st.stop()
@@ -427,12 +393,12 @@ if url:
     with st.spinner("Fetching URL metadata…"):
         meta = build_source_meta(url)
 
-col1, col2 = st.columns(2)
-with col1:
+c1, c2 = st.columns(2)
+with c1:
     st.subheader("Auto analysis")
     st.write(f"**Source:** `{meta.source}`")
     st.write(f"**Title:** {meta.title}")
-with col2:
+with c2:
     st.subheader("Description")
     st.write(meta.description if meta.description else "_No description extracted (some platforms block scraping)._")
 
@@ -453,9 +419,8 @@ if generate:
                 )
             except Exception as e:
                 msg = str(e)
-                # quota fallback
                 if ("RESOURCE_EXHAUSTED" in msg) or ("429" in msg) or ("quota" in msg.lower()):
-                    st.warning("Gemini quota exceeded. Using offline fallback storyboard (still good quality).")
+                    st.warning("Gemini quota exceeded. Using offline fallback storyboard.")
                     data = fallback_storyboard(
                         meta=meta,
                         idea=idea,
@@ -506,20 +471,20 @@ if "project" in st.session_state:
     st.json(project["continuity"])
 
     st.divider()
-    st.subheader("Scene Cards")
+    st.subheader("Scene Cards (Master Prompt)")
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     zip_bytes = build_zip(project)
 
-    cA, cB = st.columns(2)
-    with cA:
+    colA, colB = st.columns(2)
+    with colA:
         st.download_button(
-            "Download ZIP (scene txt + project.json)",
+            "Download ZIP (master_prompt per scene + project.json)",
             data=zip_bytes,
             file_name=f"storyboard_{stamp}.zip",
             mime="application/zip",
         )
-    with cB:
+    with colB:
         st.download_button(
             "Download JSON",
             data=json.dumps(project, ensure_ascii=False, indent=2).encode("utf-8"),
@@ -536,7 +501,5 @@ if "project" in st.session_state:
                 st.markdown(f"### SCENE {s['idx']} — {s['title']}")
                 st.markdown("**STORY**")
                 st.write(s["story"])
-                st.markdown("**VIDEO PROMPT**")
-                st.code(s["video_prompt"], language="text")
-                st.markdown("**IMAGE PROMPT**")
-                st.code(s["image_prompt"], language="text")
+                st.markdown("**MASTER PROMPT (VIDEO + IMAGE)**")
+                st.code(s["master_prompt"], language="text")
