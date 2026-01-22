@@ -121,4 +121,4 @@ if generate and api_key:
                 st.caption("Image Prompt")
 
 elif generate and not api_key:
-    st.warning("Please enter your API Key.")
+    st.warning("AIzaSyBeo-4OLXtqtCkr86-4kER-nN08Jcjq250.")
