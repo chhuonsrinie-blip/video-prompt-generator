@@ -1,7 +1,7 @@
 import os
 import math
 import streamlit as st
-from google import genai
+import google.generativeai as genai
 
 # ---------------------------
 # CONFIG
