@@ -1,28 +1,8 @@
 import streamlit as st
-import time
+import google.generativeai as genai
 import json
+import time
 import os
-import sys
-import subprocess
-
-# --- 🛠️ AUTO-REPAIR ZONE ---
-# This forces the server to update the AI library if it's too old
-try:
-    import google.generativeai as genai
-    from importlib.metadata import version
-    current_ver = version("google-generativeai")
-    
-    # If version is old (older than 0.8.0), force update
-    if current_ver < "0.8.0":
-        st.warning(f"⚠️ Updating AI Brain... (Current: {current_ver}) - Please wait 10s...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "google-generativeai>=0.8.3"])
-        st.success("✅ Update Complete! Reloading...")
-        time.sleep(2)
-        st.rerun()
-except Exception as e:
-    # If not found at all, install it
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "google-generativeai>=0.8.3"])
-    st.rerun()
 
 # --- APP CONFIGURATION ---
 st.set_page_config(page_title="Google Studio: Omni", page_icon="♾️", layout="wide")
@@ -45,9 +25,6 @@ st.markdown("""
 with st.sidebar:
     st.title("🎛️ Control Center")
     
-    # Debug info (so you can see it working)
-    st.caption(f"✅ System Version: {genai.__version__}")
-
     if "GOOGLE_API_KEY" in st.secrets:
         api_key = st.secrets["GOOGLE_API_KEY"]
         st.success("Key loaded from Secrets")
@@ -56,26 +33,22 @@ with st.sidebar:
     
     st.divider()
     
+    # WE REMOVED THE EXPERIMENTAL MODEL TO PREVENT 429 ERRORS
     selected_model = st.selectbox(
         "Choose your engine:",
         [
-            "gemini-1.5-flash",       # FASTEST & FREE
+            "gemini-1.5-flash",       # FASTEST & FREE (Recommended)
             "gemini-1.5-pro",         # SMARTEST
-            "gemini-2.0-flash-exp",   # EXPERIMENTAL (Limit 429 prone)
         ],
         index=0 
     )
     
-    # Visual feedback for model selection
-    if "flash" in selected_model and "2.0" not in selected_model:
+    if "flash" in selected_model:
         border_color = "#F59E0B" # Orange
         st.info("⚡ **Flash 1.5:** Best for speed and high limits.")
-    elif "pro" in selected_model:
+    else:
         border_color = "#8B5CF6" # Purple
         st.info("🧠 **Pro 1.5:** Best for creative writing.")
-    else:
-        border_color = "#3B82F6" # Blue
-        st.info("✨ **Flash 2.0:** Experimental (Low Limits).")
 
 # --- AI FUNCTIONS ---
 def get_gemini_response(prompt, model_name):
