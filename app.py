@@ -2,12 +2,24 @@ import streamlit as st
 import google.generativeai as genai
 import json
 import time
-import os
 
-# --- APP CONFIGURATION ---
+# --- VERSION CHECK (DEBUGGER) ---
+# This will show us if the server is actually using the new version
 st.set_page_config(page_title="Google Studio: Omni", page_icon="♾️", layout="wide")
 
-# Custom CSS
+try:
+    from importlib.metadata import version
+    ver = version("google-generativeai")
+except:
+    ver = "Unknown"
+
+# If the version is old, we show a warning
+if ver < "0.8.0":
+    st.error(f"⚠️ SERVER ERROR: Using old AI Brain (Version {ver}). Please update requirements.txt and Reboot.")
+else:
+    st.success(f"✅ System Healthy: AI Brain Version {ver}")
+
+# --- APP CONFIGURATION ---
 st.markdown("""
 <style>
     .stApp { background-color: #0e1117; color: white; }
@@ -33,11 +45,10 @@ with st.sidebar:
     
     st.divider()
     
-    # WE REMOVED THE EXPERIMENTAL MODEL TO PREVENT 429 ERRORS
     selected_model = st.selectbox(
         "Choose your engine:",
         [
-            "gemini-1.5-flash",       # FASTEST & FREE (Recommended)
+            "gemini-1.5-flash",       # FASTEST & FREE
             "gemini-1.5-pro",         # SMARTEST
         ],
         index=0 
@@ -121,4 +132,4 @@ if generate and api_key:
                 st.caption("Image Prompt")
 
 elif generate and not api_key:
-    st.warning("AIzaSyBeo-4OLXtqtCkr86-4kER-nN08Jcjq250.")
+    st.warning("Please enter your API Key.")
